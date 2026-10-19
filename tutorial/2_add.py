@@ -10,17 +10,17 @@ from utils import bench_sweep
 
 @triton.jit
 def add_kernel(
-    x_ptr, y_ptr, out_ptr, x_stride, y_stride, out_stride, n, BLOCK_SIZE: tl.constexpr
+    x_ptr, y_ptr, out_ptr, stride_x, stride_y, stride_out, n, BLOCK_SIZE: tl.constexpr
 ):
     pid = tl.program_id(axis=0)
 
     offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
     mask = offsets < n
 
-    x = tl.load(x_ptr + offsets * x_stride, mask=mask)
-    y = tl.load(y_ptr + offsets * y_stride, mask=mask)
+    x = tl.load(x_ptr + offsets * stride_x, mask=mask)
+    y = tl.load(y_ptr + offsets * stride_y, mask=mask)
 
-    tl.store(out_ptr + offsets * out_stride, x + y, mask=mask)
+    tl.store(out_ptr + offsets * stride_out, x + y, mask=mask)
 
 
 def add(x, y):
@@ -33,7 +33,9 @@ def add(x, y):
     BLOCK_SIZE = 1024
     grid = (triton.cdiv(n, BLOCK_SIZE),)
 
-    add_kernel[grid](x, y, out, x.stride(0), y.stride(0), out.stride(0), n, BLOCK_SIZE)
+    add_kernel[grid](
+        x, y, out, x.stride(0), y.stride(0), out.stride(0), n, BLOCK_SIZE=BLOCK_SIZE
+    )
 
     return out
 

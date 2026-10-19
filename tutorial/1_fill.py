@@ -25,7 +25,7 @@ def fill(x: torch.Tensor, value: float):
     n = x.shape[0]
     grid = (triton.cdiv(n, BLOCK_SIZE),)
 
-    fill_kernel[grid](x, value, n, BLOCK_SIZE)
+    fill_kernel[grid](x, value, n, BLOCK_SIZE=BLOCK_SIZE)
     return x
 
 
