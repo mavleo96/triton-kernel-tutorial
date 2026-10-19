@@ -7,11 +7,15 @@ from utils import bench_sweep
 @triton.jit
 def relu_fused_kernel(
     x_ptr,
-    x_stride,
     w_ptr,
     b_ptr,
     out_ptr,
-    out_stride,
+    stride_xn,
+    stride_xd,
+    stride_wd,
+    stride_bd,
+    stride_on,
+    stride_od,
     n,
     d,
     BLOCK_N: tl.constexpr,
@@ -26,18 +30,18 @@ def relu_fused_kernel(
     d_mask = d_offsets < d
 
     x = tl.load(
-        x_ptr + n_offsets[:, None] * x_stride[0] + d_offsets * x_stride[1],
+        x_ptr + n_offsets[:, None] * stride_xn + d_offsets * stride_xd,
         mask=n_mask[:, None] & d_mask,
     )
 
-    w = tl.load(w_ptr + d_offsets, mask=d_mask)
-    b = tl.load(b_ptr + d_offsets, mask=d_mask)
+    w = tl.load(w_ptr + d_offsets * stride_wd, mask=d_mask)
+    b = tl.load(b_ptr + d_offsets * stride_bd, mask=d_mask)
 
     y = x * w + b
     y_relu = tl.maximum(y, 0)
 
     tl.store(
-        out_ptr + n_offsets[:, None] * out_stride[0] + d_offsets * out_stride[1],
+        out_ptr + n_offsets[:, None] * stride_on + d_offsets * stride_od,
         y_relu,
         mask=n_mask[:, None] & d_mask,
     )
@@ -58,7 +62,20 @@ def relu_fused(x, w, b, BLOCK=256):
         grid = (triton.cdiv(n, BLOCK_N), 1)
 
     relu_fused_kernel[grid](
-        x, x.stride(), w, b, out, out.stride(), n, d, BLOCK_N=BLOCK_N, BLOCK_D=BLOCK_D
+        x,
+        w,
+        b,
+        out,
+        x.stride(0),
+        x.stride(1),
+        w.stride(0),
+        b.stride(0),
+        out.stride(0),
+        out.stride(1),
+        n,
+        d,
+        BLOCK_N=BLOCK_N,
+        BLOCK_D=BLOCK_D,
     )
 
     return out
@@ -89,18 +106,22 @@ if __name__ == "__main__":
             torch.randn(512, device="cuda"),
             torch.randn(512, device="cuda"),
         ),
-        name="relu_fused",
+        title="Compare: Triton vs. torch.compile vs. eager",
+        filename="relu_fused",
         xlabel="n",
     )
 
     # Benchmark over block size
-    x = torch.randn(100, 1024, device="cuda")
-    w = torch.randn(1024, device="cuda")
-    b = torch.randn(1024, device="cuda")
     bench_sweep(
         {"triton": relu_fused},
         [128, 256, 512, 1024, 2048, 4096],
-        lambda block: (x, w, b, block),
-        name="relu_fused_block",
+        lambda block: (
+            torch.randn(1000, 512, device="cuda"),
+            torch.randn(512, device="cuda"),
+            torch.randn(512, device="cuda"),
+            block,
+        ),
+        title="Compare: Triton vs. torch.compile vs. eager",
+        filename="relu_fused_block",
         xlabel="BLOCK",
     )
