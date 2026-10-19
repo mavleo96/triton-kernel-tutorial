@@ -41,9 +41,10 @@ if __name__ == "__main__":
     print("correct!")
 
     bench_sweep(
-        {"torch fill": torch_func, "triton": fill},
+        {"torch.fill_": torch_func, "triton": fill},
         [2**i for i in range(7, 16)],
         lambda n: (torch.empty(n, device="cuda", dtype=torch.float32), value),
-        name="fill",
         xlabel="size",
+        title="Compare: Triton vs. torch.fill_",
+        filename="1_fill",
     )

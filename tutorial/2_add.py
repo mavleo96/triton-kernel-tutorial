@@ -46,9 +46,10 @@ if __name__ == "__main__":
     print("correct!")
 
     bench_sweep(
-        {"torch add": torch.add, "triton": add},
+        {"torch.add": torch.add, "triton": add},
         [2**i for i in range(7, 16)],
         lambda n: (torch.randn(n, device="cuda"), torch.randn(n, device="cuda")),
-        name="add",
         xlabel="size",
+        title="Compare: Triton vs. torch.add",
+        filename="2_add",
     )

@@ -1,6 +1,7 @@
 import torch
 import triton
 import triton.language as tl
+from utils import bench_sweep
 
 
 @triton.jit
@@ -42,10 +43,9 @@ def relu_fused_kernel(
     )
 
 
-def relu_fused(x, w, b):
+def relu_fused(x, w, b, BLOCK=256):
     out = torch.empty_like(x)
 
-    BLOCK = 256
     n, d = x.shape
 
     if triton.next_power_of_2(d) > BLOCK:
@@ -65,32 +65,42 @@ def relu_fused(x, w, b):
 
 
 if __name__ == "__main__":
-    from triton.testing import do_bench
+    x_test = torch.randn(1000, 512, device="cuda")
+    w_test = torch.randn(512, device="cuda")
+    b_test = torch.randn(512, device="cuda")
+
+    eager_func = lambda x, w, b: torch.relu(x * w + b)
+
+    torch.testing.assert_close(
+        eager_func(x_test, w_test, b_test), relu_fused(x_test, w_test, b_test)
+    )
+    print("correct!")
 
     # Benchmark over triton, compile and eager
-    n = 50_000
-    x = torch.randn(512, n).cuda().T
-    w = torch.randn(512).cuda()
-    b = torch.randn(512).cuda()
-
-    eager = lambda: torch.relu(x * w + b)
-    compiled_fn = torch.compile(lambda x, w, b: torch.relu(x * w + b))
-    compiled = lambda: compiled_fn(x, w, b)
-    yours = lambda: relu_fused(x, w, b)
-
-    torch.testing.assert_close(yours(), eager())
-
-    for name, f in [("eager", eager), ("torch.compile", compiled), ("triton", yours)]:
-        ms = do_bench(f, warmup=50, rep=1000)
-        print(f"{name:14s} {ms:.3f} ms")
+    # dynamic=False recompiles a shape-specialized kernel for every n; raise the
+    # recompile limit (default 8) so later sizes don't silently fall back to eager.
+    torch._dynamo.config.recompile_limit = 64
+    compiled = torch.compile(eager_func, dynamic=False)
+    bench_sweep(
+        {"eager": eager_func, "torch.compile": compiled, "triton": relu_fused},
+        [2**i for i in range(7, 16)],
+        lambda n: (
+            torch.randn(n, 512, device="cuda"),
+            torch.randn(512, device="cuda"),
+            torch.randn(512, device="cuda"),
+        ),
+        name="relu_fused",
+        xlabel="n",
+    )
 
     # Benchmark over block size
-    n = 100
-    x = torch.randn(n, 1024).cuda()
-    w = torch.randn(1024).cuda()
-    b = torch.randn(1024).cuda()
-
-    for block_size in [128, 256, 512, 1024, 2048, 4096]:
-        yours = lambda: relu_fused(x, w, b, BLOCK=block_size)
-        ms = do_bench(yours, warmup=50, rep=1000)
-        print(f"{block_size:14d} {ms:.3f} ms")
+    x = torch.randn(100, 1024, device="cuda")
+    w = torch.randn(1024, device="cuda")
+    b = torch.randn(1024, device="cuda")
+    bench_sweep(
+        {"triton": relu_fused},
+        [128, 256, 512, 1024, 2048, 4096],
+        lambda block: (x, w, b, block),
+        name="relu_fused_block",
+        xlabel="BLOCK",
+    )
